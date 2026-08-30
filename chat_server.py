@@ -88,6 +88,6 @@ async def chat_message(sid, data):
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 80))
+    port = int(os.environ.get("PORT", 7860))
     print(f"🚀 聊天室运行在 http://0.0.0.0:{port}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
