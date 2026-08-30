@@ -43,12 +43,16 @@
     .msg-self .msg-header { color: rgba(255,255,255,0.7); }
     .msg-time { font-size: 10px; opacity: 0.6; }
     
+    .msg-img { max-width: 260px; max-height: 260px; border-radius: 8px; cursor: pointer; display: block; margin-top: 6px; object-fit: cover; }
+    
     /* 输入区 */
-    .input-area { background: #1a1a2e; padding: 12px 20px; display: flex; gap: 10px; border-top: 1px solid #2a2a4a; }
-    .input-area input { flex: 1; padding: 12px 16px; border-radius: 24px; border: 1px solid #333; background: #0f0f1a; color: #fff; font-size: 14px; outline: none; }
-    .input-area input:focus { border-color: #6c63ff; }
-    .input-area button { padding: 12px 20px; border-radius: 24px; border: none; background: linear-gradient(135deg, #6c63ff, #4facfe); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
-    .input-area button:hover { opacity: 0.9; }
+    .input-area { background: #1a1a2e; padding: 12px 20px; display: flex; gap: 10px; align-items: center; border-top: 1px solid #2a2a4a; }
+    .input-area input[type="text"] { flex: 1; padding: 12px 16px; border-radius: 24px; border: 1px solid #333; background: #0f0f1a; color: #fff; font-size: 14px; outline: none; }
+    .input-area input[type="text"]:focus { border-color: #6c63ff; }
+    .btn { padding: 12px; border-radius: 24px; border: none; background: linear-gradient(135deg, #6c63ff, #4facfe); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .btn:hover { opacity: 0.9; }
+    .btn-icon { background: #2a2a4a; border: 1px solid #333; border-radius: 50%; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; font-size: 18px; cursor: pointer; color:#e0e0e0; }
+    .btn-icon:hover { border-color: #6c63ff; }
     
     /* 侧边栏 */
     .sidebar { position: fixed; top: 60px; right: 20px; background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 12px; min-width: 140px; display: none; z-index: 100; }
@@ -58,6 +62,11 @@
     
     .btn-online { background: none; border: 1px solid #333; color: #e0e0e0; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; }
     .btn-online:hover { border-color: #6c63ff; }
+
+    /* 图片预览 */
+    .preview-wrap { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: none; align-items: center; justify-content: center; z-index: 999; cursor: zoom-out; }
+    .preview-wrap.show { display: flex; }
+    .preview-wrap img { max-width: 92vw; max-height: 92vh; border-radius: 8px; }
   </style>
 </head>
 <body>
@@ -85,24 +94,30 @@
   <div class="messages" id="messages"></div>
   
   <div class="input-area">
+    <button class="btn-icon" title="发送图片" onclick="document.getElementById('img-input').click()">🖼️</button>
+    <input type="file" id="img-input" accept="image/*" style="display:none" onchange="sendImage()">
     <input type="text" id="msg-input" placeholder="输入消息..." maxlength="500" onkeydown="if(event.key==='Enter')sendMessage()">
-    <button onclick="sendMessage()">发送</button>
+    <button class="btn" onclick="sendMessage()">发送</button>
   </div>
   
   <div class="sidebar" id="sidebar">
     <h4>在线用户</h4>
     <div id="online-list"></div>
   </div>
+  
+  <div class="preview-wrap" id="preview" onclick="this.classList.remove('show')">
+    <img id="preview-img" src="">
+  </div>
 </div>
 
 <script>
-  let socket, myName, isSelf = false;
+  let socket, myName;
 
   function joinChat() {
     const input = document.getElementById('username-input');
     myName = input.value.trim() || '匿名用户';
     if (!socket) {
-      socket = io({ path: '/ws/socket.io' });
+      socket = io({ path: '/socket.io' });
       setupListeners();
     }
     socket.emit('set_name', { name: myName });
@@ -111,9 +126,7 @@
   }
 
   function setupListeners() {
-    socket.on('connect', () => {
-      console.log('已连接');
-    });
+    socket.on('connect', () => { console.log('已连接'); });
     socket.on('message', (msg) => appendMessage(msg, false));
     socket.on('system', (msg) => appendMessage(msg, true));
     socket.on('history', (data) => {
@@ -132,19 +145,40 @@
     if (isSystem) {
       div.className = 'msg msg-system';
       div.textContent = msg.text;
-    } else {
-      div.className = `msg ${msg.user === myName ? 'msg-self' : 'msg-other'}`;
-      const header = document.createElement('div');
-      header.className = 'msg-header';
-      header.innerHTML = `<span>${msg.user}</span><span class="msg-time">${msg.time}</span>`;
+      container.appendChild(div);
+      container.scrollTop = container.scrollHeight;
+      return;
+    }
+    
+    div.className = `msg ${msg.user === myName ? 'msg-self' : 'msg-other'}`;
+    const header = document.createElement('div');
+    header.className = 'msg-header';
+    header.innerHTML = `<span>${escapeHtml(msg.user)}</span><span class="msg-time">${msg.time}</span>`;
+    div.appendChild(header);
+    
+    if (msg.text) {
       const text = document.createElement('div');
       text.textContent = msg.text;
-      div.appendChild(header);
       div.appendChild(text);
+    }
+    
+    if (msg.image) {
+      const img = document.createElement('img');
+      img.className = 'msg-img';
+      img.src = msg.image;
+      img.onclick = (e) => { e.stopPropagation(); showPreview(msg.image); };
+      img.onerror = () => { img.style.opacity = '0.4'; img.title = '图片已被清理或不可用'; };
+      div.appendChild(img);
     }
     
     container.appendChild(div);
     container.scrollTop = container.scrollHeight;
+  }
+
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
   }
 
   function sendMessage() {
@@ -154,6 +188,35 @@
     socket.emit('chat_message', { text });
     input.value = '';
     input.focus();
+  }
+
+  async function sendImage() {
+    const input = document.getElementById('img-input');
+    const file = input.files[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      alert('图片不能超过 10MB');
+      input.value = '';
+      return;
+    }
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const resp = await fetch('/upload', { method: 'POST', body: formData });
+      if (!resp.ok) throw new Error('upload failed: ' + resp.status);
+      const data = await resp.json();
+      if (data.url) {
+        socket.emit('chat_message', { text: '', image: data.url });
+      }
+    } catch (err) {
+      alert('图片上传失败: ' + err.message);
+    }
+    input.value = '';
+  }
+
+  function showPreview(url) {
+    document.getElementById('preview-img').src = url;
+    document.getElementById('preview').classList.add('show');
   }
 
   function toggleSidebar() {
